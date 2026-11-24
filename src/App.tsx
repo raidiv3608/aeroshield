@@ -185,7 +185,7 @@ export function App() {
       <footer className="border-t border-slate-800 bg-slate-900/60 py-4 mt-8">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2">
           <div>
-            <strong className="text-slate-200">AeroShield</strong> — GenAI Urban Air Defense Copilot for Wars Virtual Challenge 6
+            <strong className="text-slate-200">AeroShield</strong> — GenAI Urban Air Defense Copilot for PromptWars: Virtual Challenge (Challenge 6)
           </div>
           <div className="flex items-center gap-4 text-[11px]">
             <span>Scientific Models: EPA • WHO • UC Davis Air Quality Research • ASHRAE 241</span>

@@ -1,5 +1,5 @@
 # 🛡️ AeroShield — GenAI Urban Air Defense Copilot
-> **Wars Virtual — Challenge 6: Urban Air Quality Assistant**
+> **PromptWars: Virtual Challenge — Challenge 6: Urban Air Quality Assistant**
 > *Helping families and communities navigate severe winter smog through low-emission routines, DIY indoor air hacks, and quantified personal & collective defense.*
 
 [![AeroShield CI](https://github.com/your-username/aeroshield/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/aeroshield/actions)
@@ -146,7 +146,7 @@ AeroShield is optimized for zero-config deployment on Vercel or Netlify:
 
 ---
 
-## 👥 Hackathon Submission Checklist (Wars Virtual)
+## 👥 Hackathon Submission Checklist (PromptWars: Virtual Challenge)
 - [x] **Live Technical Deployment:** Fast, mobile-responsive, production web application.
 - [x] **Public GitHub Repository:** Clean code, TypeScript, comprehensive README, MIT license.
 - [x] **Agentic AI Architecture:** 5 specialized agents collaborating on telemetry, dosage, routines, IAQ, and community impact.
