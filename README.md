@@ -3,8 +3,9 @@
 > *Helping families and communities navigate severe winter smog through low-emission routines, DIY indoor air hacks, and quantified personal & collective defense.*
 
 [![AeroShield CI](https://github.com/your-username/aeroshield/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/aeroshield/actions)
-[![Tests: 57 Passed](https://img.shields.io/badge/Tests-57%20Passed-emerald.svg?logo=vitest)](https://vitest.dev)
+[![Tests: 59 Passed](https://img.shields.io/badge/Tests-59%20Passed-emerald.svg?logo=vitest)](https://vitest.dev)
 [![Accessibility: WCAG 2.1 AA](https://img.shields.io/badge/A11y-WCAG%202.1%20AA%20Compliant-38bdf8.svg)](https://www.w3.org/WAI/standards-guidelines/wcag/)
+[![Bundle: Code-Split](https://img.shields.io/badge/Performance-Code--Split%20%26%20Cached-6366f1.svg)](https://vitejs.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 [![React](https://img.shields.io/badge/React-18.3-61dafb.svg?logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6.svg?logo=typescript)](https://www.typescriptlang.org/)

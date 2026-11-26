@@ -1,4 +1,5 @@
 import { CityPreset, HourlyAQIData, AirQualitySnapshot, AirQualityLevel } from '../types/airQuality';
+import { TELEMETRY_CACHE_TTL_MS } from '../constants/smogConstants';
 
 export const GLOBAL_SMOG_HOTSPOTS: CityPreset[] = [
   {
@@ -51,6 +52,9 @@ export const GLOBAL_SMOG_HOTSPOTS: CityPreset[] = [
   }
 ];
 
+// In-Memory Telemetry Cache for 0ms repeated lookups and reduced network overhead
+const telemetryCache = new Map<string, { data: AirQualitySnapshot; timestamp: number }>();
+
 export function getAqiCategory(pm25: number): { level: AirQualityLevel; label: string; color: string; description: string } {
   if (pm25 <= 12) {
     return { level: 'good', label: 'Good', color: '#10b981', description: 'Air quality is satisfactory and poses little or no risk.' };
@@ -71,7 +75,7 @@ export function getAqiCategory(pm25: number): { level: AirQualityLevel; label: s
  * Converts PM2.5 (µg/m³) to US AQI standard formula
  */
 export function calculateUsAqi(pm25: number): number {
-  if (pm25 < 0) return 0;
+  if (pm25 <= 0) return 0;
   const breakpoints = [
     { cLow: 0.0, cHigh: 12.0, iLow: 0, iHigh: 50 },
     { cLow: 12.1, cHigh: 35.4, iLow: 51, iHigh: 100 },
@@ -92,7 +96,7 @@ export function calculateUsAqi(pm25: number): number {
 }
 
 /**
- * Fetches live real-time and 24h hourly forecast air quality from Open-Meteo
+ * Fetches live real-time and 24h hourly forecast air quality from Open-Meteo with in-memory caching
  */
 export async function fetchLiveAirQuality(
   lat: number,
@@ -100,6 +104,14 @@ export async function fetchLiveAirQuality(
   cityName: string,
   countryName: string
 ): Promise<AirQualitySnapshot> {
+  const cacheKey = `${lat.toFixed(2)},${lon.toFixed(2)}`;
+  const cached = telemetryCache.get(cacheKey);
+  const now = Date.now();
+
+  if (cached && (now - cached.timestamp < TELEMETRY_CACHE_TTL_MS)) {
+    return cached.data;
+  }
+
   const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lon}&hourly=pm10,pm2_5,nitrogen_dioxide,us_aqi,european_aqi&timezone=auto&forecast_days=2`;
   const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,wind_speed_10m&timezone=auto&forecast_days=2`;
 
@@ -125,20 +137,17 @@ export async function fetchLiveAirQuality(
     const hourlyTemps: number[] = weatherData?.hourly?.temperature_2m || [];
     const hourlyWind: number[] = weatherData?.hourly?.wind_speed_10m || [];
 
-    // Parse next 24 hours starting from current local hour
-    const now = new Date();
-    const currentHourIndex = Math.min(now.getHours(), hourlyTimes.length - 1);
+    const currentDate = new Date();
+    const currentHourIndex = Math.min(currentDate.getHours(), hourlyTimes.length - 1);
 
     const next24Hours: HourlyAQIData[] = [];
     for (let i = 0; i < 24; i++) {
       const idx = (currentHourIndex + i) % hourlyTimes.length;
-      const rawHour = i; // relative hour
       const pm25Val = Math.round(hourlyPm25[idx] ?? 65);
       const usAqiVal = Math.round(hourlyUsAqi[idx] ?? calculateUsAqi(pm25Val));
       const wind = Math.round((hourlyWind[idx] ?? 4) * 10) / 10;
       const temp = Math.round((hourlyTemps[idx] ?? 14) * 10) / 10;
 
-      // Inversion risk is typically severe during cold calm early mornings (03:00 - 08:00)
       const clockHour = (currentHourIndex + i) % 24;
       let inversionRisk: 'Low' | 'Moderate' | 'Severe' = 'Low';
       if (clockHour >= 3 && clockHour <= 8 && wind < 5) {
@@ -167,13 +176,12 @@ export async function fetchLiveAirQuality(
     const currentAqi = next24Hours[0].usAqi;
     const { level } = getAqiCategory(currentPm25);
 
-    // Identify Golden Dispersion Window (lowest AQI trough in afternoon, usually 13:00 - 17:00)
     const afternoonSlots = next24Hours.filter(h => h.hour >= 12 && h.hour <= 17);
     const bestWindow = afternoonSlots.length > 0
       ? afternoonSlots.reduce((prev, curr) => curr.pm25 < prev.pm25 ? curr : prev, afternoonSlots[0])
       : next24Hours.reduce((prev, curr) => curr.pm25 < prev.pm25 ? curr : prev, next24Hours[0]);
 
-    return {
+    const result: AirQualitySnapshot = {
       city: cityName,
       country: countryName,
       currentAqi,
@@ -192,8 +200,11 @@ export async function fetchLiveAirQuality(
         reason: 'Solar heating deepens the atmospheric boundary layer, breaking surface thermal inversions and temporarily dispersing smog.',
       }
     };
+
+    telemetryCache.set(cacheKey, { data: result, timestamp: now });
+    return result;
   } catch (err) {
-    console.warn('Live API request failed, generating high-fidelity fallback data:', err);
+    console.warn('Live API request failed, serving high-fidelity fallback data:', err);
     return generateFallbackAirQuality(cityName, countryName);
   }
 }
@@ -207,7 +218,6 @@ export function generateFallbackAirQuality(cityName: string, countryName: string
 
   const hourly: HourlyAQIData[] = [];
   for (let h = 0; h < 24; h++) {
-    // Diurnal curve: peaks at 07:00 and 22:00, dips at 14:00
     const diurnalFactor = 1.0 + 0.45 * Math.sin(((h - 1) / 24) * 2 * Math.PI + Math.PI / 2);
     const pm25 = Math.round(basePm25 * Math.max(0.4, diurnalFactor));
     const aqi = calculateUsAqi(pm25);
@@ -263,7 +273,7 @@ export async function searchGlobalCities(query: string): Promise<Array<{ name: s
     const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`);
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.results || []).map((item: any) => ({
+    return (data.results || []).map((item: { name: string; country?: string; latitude: number; longitude: number }) => ({
       name: item.name,
       country: item.country || '',
       latitude: item.latitude,

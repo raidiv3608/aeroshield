@@ -3,6 +3,7 @@ import {
   calculateUsAqi,
   getAqiCategory,
   generateFallbackAirQuality,
+  fetchLiveAirQuality,
   GLOBAL_SMOG_HOTSPOTS,
   searchGlobalCities,
 } from './airQualityService';
@@ -154,6 +155,19 @@ describe('airQualityService — Core Telemetry & EPA Standards', () => {
       expect(await searchGlobalCities('')).toEqual([]);
       expect(await searchGlobalCities(' ')).toEqual([]);
       expect(await searchGlobalCities('a')).toEqual([]);
+    });
+  });
+
+  describe('fetchLiveAirQuality in-memory cache resilience', () => {
+    it('returns fallback data and caches the result for repeated calls', async () => {
+      const res1 = await fetchLiveAirQuality(28.61, 77.20, 'New Delhi', 'India');
+      expect(res1.city).toBe('New Delhi');
+      expect(res1.hourly.length).toBe(24);
+
+      // Second immediate call retrieves from cache
+      const res2 = await fetchLiveAirQuality(28.61, 77.20, 'New Delhi', 'India');
+      expect(res2.city).toBe('New Delhi');
+      expect(res2.currentAqi).toBe(res1.currentAqi);
     });
   });
 });

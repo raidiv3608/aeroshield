@@ -7,6 +7,7 @@ import { FamilyVulnerabilityCard } from './FamilyVulnerabilityCard';
 import { IndoorHacksCard } from './IndoorHacksCard';
 import { CommunityShieldCard } from './CommunityShieldCard';
 import { AgentExplainer } from './AgentExplainer';
+import { ErrorBoundary } from './ErrorBoundary';
 import { DEFAULT_FAMILY_MEMBERS, DEFAULT_COMMUNITY_PLEDGES, runMultiAgentUrbanDefense } from '../agents/agentOrchestrator';
 import { generateFallbackAirQuality } from '../services/airQualityService';
 
@@ -132,6 +133,30 @@ describe('Accessibility & UI Landmark Verification (WCAG 2.1 AA)', () => {
 
       const region = screen.getByRole('region', { name: /impactlens/i });
       expect(region).toBeDefined();
+    });
+  });
+
+  describe('ErrorBoundary Component Robustness', () => {
+    it('catches render errors and renders accessible error fallback UI', () => {
+      const ProblemChild = () => {
+        throw new Error('Simulated component crash');
+      };
+
+      // Suppress console.error in test output for clean logs
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      render(
+        <ErrorBoundary>
+          <ProblemChild />
+        </ErrorBoundary>
+      );
+
+      const alert = screen.getByRole('alert');
+      expect(alert).toBeDefined();
+      expect(screen.getByText(/application exception caught/i)).toBeDefined();
+      expect(screen.getByRole('button', { name: /reload application/i })).toBeDefined();
+
+      spy.mockRestore();
     });
   });
 });
