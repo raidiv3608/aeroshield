@@ -3,7 +3,7 @@ import { Wind, Wrench, DollarSign, Layers, Sliders } from 'lucide-react';
 import { CorsiRosenthalConfig } from '../types/airQuality';
 import { calculateCorsiRosenthalMetrics } from '../utils/mathModels';
 
-export const CorsiRosenthalStudio: React.FC = () => {
+export const CorsiRosenthalStudio: React.FC = React.memo(() => {
   const [config, setConfig] = useState<CorsiRosenthalConfig>({
     fanType: 'box_fan_20in',
     fanSpeedCfm: 550,
@@ -312,4 +312,6 @@ export const CorsiRosenthalStudio: React.FC = () => {
       </div>
     </section>
   );
-};
+});
+
+CorsiRosenthalStudio.displayName = 'CorsiRosenthalStudio';

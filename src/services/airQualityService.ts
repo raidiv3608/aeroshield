@@ -55,6 +55,39 @@ export const GLOBAL_SMOG_HOTSPOTS: CityPreset[] = [
 // In-Memory Telemetry Cache for 0ms repeated lookups and reduced network overhead
 const telemetryCache = new Map<string, { data: AirQualitySnapshot; timestamp: number }>();
 
+// In-Flight Request Deduplication to prevent simultaneous identical API fetches
+const inFlightRequests = new Map<string, Promise<AirQualitySnapshot>>();
+
+// Geocoding Query Cache for instant typeahead search without network hits
+const geocodeCache = new Map<string, Array<{ name: string; country: string; latitude: number; longitude: number }>>();
+
+function getSessionCached(key: string): AirQualitySnapshot | null {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const item = window.sessionStorage.getItem(`aeroshield_${key}`);
+      if (item) {
+        const parsed = JSON.parse(item);
+        if (Date.now() - parsed.timestamp < TELEMETRY_CACHE_TTL_MS) {
+          return parsed.data;
+        }
+      }
+    }
+  } catch {
+    // SessionStorage may be restricted in private/sandbox mode; fallback safely
+  }
+  return null;
+}
+
+function setSessionCached(key: string, data: AirQualitySnapshot): void {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      window.sessionStorage.setItem(`aeroshield_${key}`, JSON.stringify({ data, timestamp: Date.now() }));
+    }
+  } catch {
+    // Non-blocking quota error or restriction
+  }
+}
+
 export function getAqiCategory(pm25: number): { level: AirQualityLevel; label: string; color: string; description: string } {
   const safePm = (typeof pm25 === 'number' && !isNaN(pm25)) ? pm25 : 0;
 
@@ -123,105 +156,126 @@ export async function fetchLiveAirQuality(
     return cached.data;
   }
 
-  const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${safeLat}&longitude=${safeLon}&hourly=pm10,pm2_5,nitrogen_dioxide,us_aqi,european_aqi&timezone=auto&forecast_days=2`;
-  const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${safeLat}&longitude=${safeLon}&hourly=temperature_2m,wind_speed_10m&timezone=auto&forecast_days=2`;
-
-  try {
-    const [aqRes, weatherRes] = await Promise.all([
-      fetch(aqUrl),
-      fetch(weatherUrl)
-    ]);
-
-    if (!aqRes.ok) {
-      throw new Error(`Air Quality API error: ${aqRes.status}`);
-    }
-
-    const aqData = await aqRes.json();
-    const weatherData = weatherRes.ok ? await weatherRes.json() : null;
-
-    const hourlyTimes: string[] = aqData?.hourly?.time || [];
-    const hourlyPm25: number[] = aqData?.hourly?.pm2_5 || [];
-    const hourlyPm10: number[] = aqData?.hourly?.pm10 || [];
-    const hourlyNo2: number[] = aqData?.hourly?.nitrogen_dioxide || [];
-    const hourlyUsAqi: number[] = aqData?.hourly?.us_aqi || [];
-    const hourlyEuAqi: number[] = aqData?.hourly?.european_aqi || [];
-    const hourlyTemps: number[] = weatherData?.hourly?.temperature_2m || [];
-    const hourlyWind: number[] = weatherData?.hourly?.wind_speed_10m || [];
-
-    const currentDate = new Date();
-    const currentHourIndex = hourlyTimes.length > 0
-      ? Math.min(currentDate.getHours(), hourlyTimes.length - 1)
-      : 0;
-
-    const next24Hours: HourlyAQIData[] = [];
-    for (let i = 0; i < 24; i++) {
-      const idx = hourlyTimes.length > 0 ? (currentHourIndex + i) % hourlyTimes.length : i;
-      const rawPm25 = hourlyPm25[idx];
-      const pm25Val = (typeof rawPm25 === 'number' && !isNaN(rawPm25) && rawPm25 >= 0) ? Math.round(rawPm25) : 65;
-      const rawUsAqi = hourlyUsAqi[idx];
-      const usAqiVal = (typeof rawUsAqi === 'number' && !isNaN(rawUsAqi) && rawUsAqi >= 0) ? Math.round(rawUsAqi) : calculateUsAqi(pm25Val);
-      const wind = Math.round(((hourlyWind[idx] ?? 4)) * 10) / 10;
-      const temp = Math.round(((hourlyTemps[idx] ?? 14)) * 10) / 10;
-
-      const clockHour = (currentHourIndex + i) % 24;
-      let inversionRisk: 'Low' | 'Moderate' | 'Severe' = 'Low';
-      if (clockHour >= 3 && clockHour <= 8 && wind < 5) {
-        inversionRisk = 'Severe';
-      } else if (clockHour >= 20 || clockHour <= 10) {
-        inversionRisk = 'Moderate';
-      }
-
-      next24Hours.push({
-        time: `${String(clockHour).padStart(2, '0')}:00`,
-        hour: clockHour,
-        pm25: pm25Val,
-        pm10: Math.round(hourlyPm10[idx] ?? pm25Val * 1.6),
-        no2: Math.round(hourlyNo2[idx] ?? 35),
-        usAqi: usAqiVal,
-        europeanAqi: Math.round(hourlyEuAqi[idx] ?? 50),
-        temperature: isFinite(temp) ? temp : 15,
-        windSpeed: isFinite(wind) ? wind : 4,
-        inversionRisk,
-      });
-    }
-
-    const currentPm25 = next24Hours[0]?.pm25 || 65;
-    const currentPm10 = next24Hours[0]?.pm10 || 100;
-    const currentNo2 = next24Hours[0]?.no2 || 35;
-    const currentAqi = next24Hours[0]?.usAqi || calculateUsAqi(currentPm25);
-    const { level } = getAqiCategory(currentPm25);
-
-    const afternoonSlots = next24Hours.filter(h => h.hour >= 12 && h.hour <= 17);
-    const bestWindow = afternoonSlots.length > 0
-      ? afternoonSlots.reduce((prev, curr) => curr.pm25 < prev.pm25 ? curr : prev, afternoonSlots[0])
-      : next24Hours.reduce((prev, curr) => curr.pm25 < prev.pm25 ? curr : prev, next24Hours[0]);
-
-    const result: AirQualitySnapshot = {
-      city: safeCity,
-      country: safeCountry,
-      currentAqi,
-      currentPm25,
-      currentPm10,
-      currentNo2,
-      level,
-      dominantPollutant: 'PM2.5 (Fine Particulate Matter)',
-      temperature: next24Hours[0]?.temperature || 15,
-      windSpeed: next24Hours[0]?.windSpeed || 4,
-      hourly: next24Hours,
-      goldenDispersionWindow: {
-        startHour: Math.max(12, (bestWindow?.hour || 14) - 1),
-        endHour: Math.min(18, (bestWindow?.hour || 14) + 2),
-        averageAqi: Math.round((bestWindow?.usAqi || currentAqi) * 0.95),
-        reason: 'Solar heating deepens the atmospheric boundary layer, breaking surface thermal inversions and temporarily dispersing smog.',
-      }
-    };
-
-    telemetryCache.set(cacheKey, { data: result, timestamp: now });
-    return result;
-  } catch (err) {
-    console.warn('Live API request failed, serving high-fidelity fallback data:', err);
-    return generateFallbackAirQuality(safeCity, safeCountry);
+  const sessionCached = getSessionCached(cacheKey);
+  if (sessionCached) {
+    telemetryCache.set(cacheKey, { data: sessionCached, timestamp: now });
+    return sessionCached;
   }
+
+  // Deduplicate concurrent in-flight requests for the exact same location
+  if (inFlightRequests.has(cacheKey)) {
+    return inFlightRequests.get(cacheKey)!;
+  }
+
+  const fetchPromise = (async () => {
+    const aqUrl = `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${safeLat}&longitude=${safeLon}&hourly=pm10,pm2_5,nitrogen_dioxide,us_aqi,european_aqi&timezone=auto&forecast_days=2`;
+    const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${safeLat}&longitude=${safeLon}&hourly=temperature_2m,wind_speed_10m&timezone=auto&forecast_days=2`;
+
+    try {
+      const [aqRes, weatherRes] = await Promise.all([
+        fetch(aqUrl),
+        fetch(weatherUrl)
+      ]);
+
+      if (!aqRes.ok) {
+        throw new Error(`Air Quality API error: ${aqRes.status}`);
+      }
+
+      const aqData = await aqRes.json();
+      const weatherData = weatherRes.ok ? await weatherRes.json() : null;
+
+      const hourlyTimes: string[] = aqData?.hourly?.time || [];
+      const hourlyPm25: number[] = aqData?.hourly?.pm2_5 || [];
+      const hourlyPm10: number[] = aqData?.hourly?.pm10 || [];
+      const hourlyNo2: number[] = aqData?.hourly?.nitrogen_dioxide || [];
+      const hourlyUsAqi: number[] = aqData?.hourly?.us_aqi || [];
+      const hourlyEuAqi: number[] = aqData?.hourly?.european_aqi || [];
+      const hourlyTemps: number[] = weatherData?.hourly?.temperature_2m || [];
+      const hourlyWind: number[] = weatherData?.hourly?.wind_speed_10m || [];
+
+      const currentDate = new Date();
+      const currentHourIndex = hourlyTimes.length > 0
+        ? Math.min(currentDate.getHours(), hourlyTimes.length - 1)
+        : 0;
+
+      const next24Hours: HourlyAQIData[] = [];
+      for (let i = 0; i < 24; i++) {
+        const idx = hourlyTimes.length > 0 ? (currentHourIndex + i) % hourlyTimes.length : i;
+        const rawPm25 = hourlyPm25[idx];
+        const pm25Val = (typeof rawPm25 === 'number' && !isNaN(rawPm25) && rawPm25 >= 0) ? Math.round(rawPm25) : 65;
+        const rawUsAqi = hourlyUsAqi[idx];
+        const usAqiVal = (typeof rawUsAqi === 'number' && !isNaN(rawUsAqi) && rawUsAqi >= 0) ? Math.round(rawUsAqi) : calculateUsAqi(pm25Val);
+        const wind = Math.round(((hourlyWind[idx] ?? 4)) * 10) / 10;
+        const temp = Math.round(((hourlyTemps[idx] ?? 14)) * 10) / 10;
+
+        const clockHour = (currentHourIndex + i) % 24;
+        let inversionRisk: 'Low' | 'Moderate' | 'Severe' = 'Low';
+        if (clockHour >= 3 && clockHour <= 8 && wind < 5) {
+          inversionRisk = 'Severe';
+        } else if (clockHour >= 20 || clockHour <= 10) {
+          inversionRisk = 'Moderate';
+        }
+
+        next24Hours.push({
+          time: `${String(clockHour).padStart(2, '0')}:00`,
+          hour: clockHour,
+          pm25: pm25Val,
+          pm10: Math.round(hourlyPm10[idx] ?? pm25Val * 1.6),
+          no2: Math.round(hourlyNo2[idx] ?? 35),
+          usAqi: usAqiVal,
+          europeanAqi: Math.round(hourlyEuAqi[idx] ?? 50),
+          temperature: isFinite(temp) ? temp : 15,
+          windSpeed: isFinite(wind) ? wind : 4,
+          inversionRisk,
+        });
+      }
+
+      const currentPm25 = next24Hours[0]?.pm25 || 65;
+      const currentPm10 = next24Hours[0]?.pm10 || 100;
+      const currentNo2 = next24Hours[0]?.no2 || 35;
+      const currentAqi = next24Hours[0]?.usAqi || calculateUsAqi(currentPm25);
+      const { level } = getAqiCategory(currentPm25);
+
+      const afternoonSlots = next24Hours.filter(h => h.hour >= 12 && h.hour <= 17);
+      const bestWindow = afternoonSlots.length > 0
+        ? afternoonSlots.reduce((prev, curr) => curr.pm25 < prev.pm25 ? curr : prev, afternoonSlots[0])
+        : next24Hours.reduce((prev, curr) => curr.pm25 < prev.pm25 ? curr : prev, next24Hours[0]);
+
+      const result: AirQualitySnapshot = {
+        city: safeCity,
+        country: safeCountry,
+        currentAqi,
+        currentPm25,
+        currentPm10,
+        currentNo2,
+        level,
+        dominantPollutant: 'PM2.5 (Fine Particulate Matter)',
+        temperature: next24Hours[0]?.temperature || 15,
+        windSpeed: next24Hours[0]?.windSpeed || 4,
+        hourly: next24Hours,
+        goldenDispersionWindow: {
+          startHour: Math.max(12, (bestWindow?.hour || 14) - 1),
+          endHour: Math.min(18, (bestWindow?.hour || 14) + 2),
+          averageAqi: Math.round((bestWindow?.usAqi || currentAqi) * 0.95),
+          reason: 'Solar heating deepens the atmospheric boundary layer, breaking surface thermal inversions and temporarily dispersing smog.',
+        }
+      };
+
+      telemetryCache.set(cacheKey, { data: result, timestamp: Date.now() });
+      setSessionCached(cacheKey, result);
+      return result;
+    } catch (err) {
+      console.warn('Live API request failed, serving high-fidelity fallback data:', err);
+      const fallback = generateFallbackAirQuality(safeCity, safeCountry);
+      telemetryCache.set(cacheKey, { data: fallback, timestamp: Date.now() });
+      return fallback;
+    } finally {
+      inFlightRequests.delete(cacheKey);
+    }
+  })();
+
+  inFlightRequests.set(cacheKey, fetchPromise);
+  return fetchPromise;
 }
 
 /**
@@ -291,16 +345,24 @@ export async function searchGlobalCities(query: string): Promise<Array<{ name: s
   const trimmed = query.trim();
   if (trimmed.length < 2 || trimmed.length > 200) return [];
 
+  const cacheKey = trimmed.toLowerCase();
+  if (geocodeCache.has(cacheKey)) {
+    return geocodeCache.get(cacheKey)!;
+  }
+
   try {
     const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(trimmed)}&count=5&language=en&format=json`);
     if (!res.ok) return [];
     const data = await res.json();
-    return (data?.results || []).map((item: { name: string; country?: string; latitude: number; longitude: number }) => ({
+    const results = (data?.results || []).map((item: { name: string; country?: string; latitude: number; longitude: number }) => ({
       name: item.name || '',
       country: item.country || '',
       latitude: item.latitude || 0,
       longitude: item.longitude || 0,
     })).filter((item: { name: string }) => item.name.length > 0);
+
+    geocodeCache.set(cacheKey, results);
+    return results;
   } catch {
     return [];
   }

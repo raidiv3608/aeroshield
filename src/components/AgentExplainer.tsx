@@ -6,7 +6,7 @@ interface AgentExplainerProps {
   decision: MultiAgentDecisionResult;
 }
 
-export const AgentExplainer: React.FC<AgentExplainerProps> = ({ decision }) => {
+export const AgentExplainer: React.FC<AgentExplainerProps> = React.memo(({ decision }) => {
   return (
     <section
       role="region"
@@ -71,4 +71,6 @@ export const AgentExplainer: React.FC<AgentExplainerProps> = ({ decision }) => {
       </div>
     </section>
   );
-};
+});
+
+AgentExplainer.displayName = 'AgentExplainer';

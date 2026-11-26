@@ -12,7 +12,7 @@ interface HeaderProps {
   onTriggerAiRefresh: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
+export const Header: React.FC<HeaderProps> = React.memo(({
   currentCity,
   currentCountry,
   onSelectCity,
@@ -146,4 +146,6 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
     </header>
   );
-};
+});
+
+Header.displayName = 'Header';

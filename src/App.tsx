@@ -1,17 +1,41 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useRef, useMemo, useCallback, Suspense } from 'react';
 import { Header } from './components/Header';
 import { SmogRadarCard } from './components/SmogRadarCard';
-import { RoutinePlannerCard } from './components/RoutinePlannerCard';
-import { CorsiRosenthalStudio } from './components/CorsiRosenthalStudio';
 import { FamilyVulnerabilityCard } from './components/FamilyVulnerabilityCard';
 import { IndoorHacksCard } from './components/IndoorHacksCard';
-import { CommunityShieldCard } from './components/CommunityShieldCard';
 import { AgentExplainer } from './components/AgentExplainer';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { fetchLiveAirQuality, GLOBAL_SMOG_HOTSPOTS, searchGlobalCities } from './services/airQualityService';
-import { AirQualitySnapshot, CityPreset, FamilyMember, CorsiRosenthalConfig } from './types/airQuality';
+import { useAirQuality } from './hooks/useAirQuality';
+import { GLOBAL_SMOG_HOTSPOTS, searchGlobalCities } from './services/airQualityService';
+import { CityPreset, FamilyMember, CorsiRosenthalConfig } from './types/airQuality';
 import { runMultiAgentUrbanDefense, DEFAULT_FAMILY_MEMBERS } from './agents/agentOrchestrator';
 import { FileText, Copy, Check, X } from 'lucide-react';
+
+// Dynamic lazy-loading of secondary tabs for optimal initial chunk size & instant FCP
+const RoutinePlannerCard = React.lazy(() =>
+  import('./components/RoutinePlannerCard').then((m) => ({ default: m.RoutinePlannerCard }))
+);
+const CorsiRosenthalStudio = React.lazy(() =>
+  import('./components/CorsiRosenthalStudio').then((m) => ({ default: m.CorsiRosenthalStudio }))
+);
+const CommunityShieldCard = React.lazy(() =>
+  import('./components/CommunityShieldCard').then((m) => ({ default: m.CommunityShieldCard }))
+);
+
+const CardLoadingFallback: React.FC = () => (
+  <div
+    role="status"
+    aria-busy="true"
+    aria-label="Loading module..."
+    className="bg-slate-900/60 border border-slate-800 rounded-2xl p-12 flex flex-col items-center justify-center space-y-3"
+  >
+    <div
+      className="w-8 h-8 border-3 border-emerald-500 border-t-transparent rounded-full animate-spin"
+      aria-hidden="true"
+    />
+    <span className="text-xs text-slate-400 font-medium">Assembling multi-agent module...</span>
+  </div>
+);
 
 type TabId = 'overview' | 'routine' | 'diy_purifier' | 'community';
 
@@ -29,10 +53,16 @@ const TABS: TabItem[] = [
 ];
 
 export function App() {
-  const [selectedCity, setSelectedCity] = useState<CityPreset>(GLOBAL_SMOG_HOTSPOTS[0]); // Default: New Delhi
-  const [snapshot, setSnapshot] = useState<AirQualitySnapshot | null>(null);
+  const {
+    selectedCity,
+    setSelectedCity,
+    snapshot,
+    loading,
+    refetch,
+  } = useAirQuality(GLOBAL_SMOG_HOTSPOTS[0]);
+
   const [family, setFamily] = useState<FamilyMember[]>(DEFAULT_FAMILY_MEMBERS);
-  const [crConfig, setCrConfig] = useState<CorsiRosenthalConfig>({
+  const [crConfig] = useState<CorsiRosenthalConfig>({
     fanType: 'box_fan_20in',
     fanSpeedCfm: 550,
     filterRating: 'MERV13',
@@ -43,7 +73,6 @@ export function App() {
     roomType: 'living_room',
   });
   const [activeTab, setActiveTab] = useState<TabId>('overview');
-  const [loading, setLoading] = useState<boolean>(true);
   const [isAiProcessing, setIsAiProcessing] = useState<boolean>(false);
   const [screenReaderAnnouncement, setScreenReaderAnnouncement] = useState<string>('');
   const [showPlanModal, setShowPlanModal] = useState<boolean>(false);
@@ -51,33 +80,10 @@ export function App() {
 
   const tabRefs = useRef<{ [key in TabId]?: HTMLButtonElement | null }>({});
 
-  // Load telemetry data on city change
-  useEffect(() => {
-    let isMounted = true;
-    async function loadData() {
-      setLoading(true);
-      setScreenReaderAnnouncement(`Loading air quality telemetry for ${selectedCity.name}, ${selectedCity.country}...`);
-      const data = await fetchLiveAirQuality(
-        selectedCity.latitude,
-        selectedCity.longitude,
-        selectedCity.name,
-        selectedCity.country
-      );
-      if (isMounted) {
-        setSnapshot(data);
-        setLoading(false);
-        setScreenReaderAnnouncement(
-          `Air quality updated for ${selectedCity.name}. Current AQI is ${data.currentAqi}, PM2.5 is ${data.currentPm25} micrograms per cubic meter, classified as ${data.level}.`
-        );
-      }
-    }
-    loadData();
-    return () => { isMounted = false; };
-  }, [selectedCity]);
-
   const handleCitySelect = useCallback((preset: CityPreset) => {
     setSelectedCity(preset);
-  }, []);
+    setScreenReaderAnnouncement(`Selected city ${preset.name}, ${preset.country}. Updating air quality.`);
+  }, [setSelectedCity]);
 
   const handleSearchQuery = useCallback(async (query: string) => {
     setScreenReaderAnnouncement(`Searching for city: ${query}`);
@@ -92,35 +98,39 @@ export function App() {
         regionDescription: `Live telemetry for ${first.name}, ${first.country}`,
         winterSmogCause: 'Regional urban emission basin and seasonal meteorological stagnation.',
       });
+      setScreenReaderAnnouncement(`Loaded telemetry for ${first.name}, ${first.country}`);
     } else {
       setScreenReaderAnnouncement(`No matching cities found for ${query}.`);
     }
-  }, []);
+  }, [setSelectedCity]);
 
   const handleUpdateMask = useCallback((memberId: string, maskType: FamilyMember['maskType']) => {
-    setFamily(prev => {
-      const next = prev.map(m => m.id === memberId ? { ...m, maskType } : m);
-      const member = next.find(m => m.id === memberId);
+    setFamily((prev) => {
+      const next = prev.map((m) => (m.id === memberId ? { ...m, maskType } : m));
+      const member = next.find((m) => m.id === memberId);
       if (member) {
-        setScreenReaderAnnouncement(`Updated mask for ${member.name} to ${maskType}. Recalculating particulate dosage.`);
+        setScreenReaderAnnouncement(
+          `Updated mask for ${member.name} to ${maskType}. Recalculating particulate dosage.`
+        );
       }
       return next;
     });
   }, []);
 
   const handleAddMember = useCallback((newMember: FamilyMember) => {
-    setFamily(prev => [...prev, newMember]);
+    setFamily((prev) => [...prev, newMember]);
     setScreenReaderAnnouncement(`Added custom family member profile for ${newMember.name}.`);
   }, []);
 
-  const handleTriggerAiRefresh = useCallback(() => {
+  const handleTriggerAiRefresh = useCallback(async () => {
     setIsAiProcessing(true);
     setScreenReaderAnnouncement('Re-running multi-agent reasoning models across all modules...');
+    await refetch();
     setTimeout(() => {
       setIsAiProcessing(false);
       setScreenReaderAnnouncement('Multi-agent reasoning updated successfully with latest telemetry.');
-    }, 900);
-  }, []);
+    }, 600);
+  }, [refetch]);
 
   // Keyboard navigation for WAI-ARIA tab pattern
   const handleTabKeyDown = (e: React.KeyboardEvent, index: number) => {
@@ -162,7 +172,9 @@ Location: ${snapshot.city}, ${snapshot.country} | Current AQI: ${snapshot.curren
    Rationale: Solar heating breaks ground-level inversion layer.
 
 2. FAMILY LUNG PROTECTION:
-   Total PM2.5 Inhaled Burden Avoided: ${decision.familyDosageComparison.baselineTotalUrg - decision.familyDosageComparison.optimizedTotalUrg} µg (-${decision.familyDosageComparison.reductionPercentage}%)
+   Total PM2.5 Inhaled Burden Avoided: ${
+     decision.familyDosageComparison.baselineTotalUrg - decision.familyDosageComparison.optimizedTotalUrg
+   } µg (-${decision.familyDosageComparison.reductionPercentage}%)
    Equivalent Cigarettes Avoided: ${decision.familyDosageComparison.cigarettesAvoided} cigarettes today.
 
 3. INDOOR AIR QUALITY (IAQ) DEFENSE:
@@ -170,7 +182,9 @@ Location: ${snapshot.city}, ${snapshot.country} | Current AQI: ${snapshot.curren
    Cooking/Heating: Always run exhaust 2 min before frying; wet-mop only (never dry sweep).
 
 4. RE-SCHEDULED ROUTINE:
-   ${decision.optimizedRoutineTasks.map(t => `• ${t.title}: Shifted to ${t.optimizedHour}:00 (${t.optimizedTransit.replace(/_/g, ' ')})`).join('\n   ')}
+   ${decision.optimizedRoutineTasks
+     .map((t) => `• ${t.title}: Shifted to ${t.optimizedHour}:00 (${t.optimizedTransit.replace(/_/g, ' ')})`)
+     .join('\n   ')}
 
 Shared via AeroShield — GenAI Urban Air Defense Copilot`;
   }, [snapshot, decision]);
@@ -307,55 +321,63 @@ Shared via AeroShield — GenAI Urban Air Defense Copilot`;
               )}
 
               {activeTab === 'routine' && (
-                <div className="space-y-6">
-                  <RoutinePlannerCard
-                    tasks={decision.optimizedRoutineTasks}
-                    onApplySchedule={() => {
-                      setScreenReaderAnnouncement('Optimized low-emission routine applied successfully. Particulate and emissions reductions recorded.');
-                    }}
-                  />
-                  <SmogRadarCard snapshot={snapshot} />
-                  <AgentExplainer decision={decision} />
-                </div>
+                <Suspense fallback={<CardLoadingFallback />}>
+                  <div className="space-y-6">
+                    <RoutinePlannerCard
+                      tasks={decision.optimizedRoutineTasks}
+                      onApplySchedule={() => {
+                        setScreenReaderAnnouncement(
+                          'Optimized low-emission routine applied successfully. Particulate and emissions reductions recorded.'
+                        );
+                      }}
+                    />
+                    <SmogRadarCard snapshot={snapshot} />
+                    <AgentExplainer decision={decision} />
+                  </div>
+                </Suspense>
               )}
 
               {activeTab === 'diy_purifier' && (
-                <div className="space-y-6">
-                  <CorsiRosenthalStudio />
-                  <IndoorHacksCard
-                    windowVentilationSlot={decision.indoorAirRecommendations.windowVentilationSlot}
-                    ventilationRationale={decision.indoorAirRecommendations.ventilationRationale}
-                    cookingAndHeatingHacks={decision.indoorAirRecommendations.cookingAndHeatingHacks}
-                  />
-                  <AgentExplainer decision={decision} />
-                </div>
+                <Suspense fallback={<CardLoadingFallback />}>
+                  <div className="space-y-6">
+                    <CorsiRosenthalStudio />
+                    <IndoorHacksCard
+                      windowVentilationSlot={decision.indoorAirRecommendations.windowVentilationSlot}
+                      ventilationRationale={decision.indoorAirRecommendations.ventilationRationale}
+                      cookingAndHeatingHacks={decision.indoorAirRecommendations.cookingAndHeatingHacks}
+                    />
+                    <AgentExplainer decision={decision} />
+                  </div>
+                </Suspense>
               )}
 
               {activeTab === 'community' && (
-                <div className="space-y-6">
-                  <CommunityShieldCard pledges={decision.communityPledges} />
-                  <RoutinePlannerCard
-                    tasks={decision.optimizedRoutineTasks}
-                    onApplySchedule={() => {
-                      setScreenReaderAnnouncement('Smart routine adopted successfully.');
-                    }}
-                  />
-                  <AgentExplainer decision={decision} />
-                </div>
+                <Suspense fallback={<CardLoadingFallback />}>
+                  <div className="space-y-6">
+                    <CommunityShieldCard pledges={decision.communityPledges} />
+                    <RoutinePlannerCard
+                      tasks={decision.optimizedRoutineTasks}
+                      onApplySchedule={() => {
+                        setScreenReaderAnnouncement('Smart routine adopted successfully.');
+                      }}
+                    />
+                    <AgentExplainer decision={decision} />
+                  </div>
+                </Suspense>
               )}
             </>
           )}
         </main>
 
         {/* Action Plan Export Modal */}
-        {showPlanModal && (
+        {showPlanModal && decision && snapshot && (
           <div
             role="dialog"
             aria-modal="true"
             aria-labelledby="plan-modal-title"
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in"
           >
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl relative space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                 <div className="flex items-center gap-2">
                   <FileText className="h-5 w-5 text-emerald-400" aria-hidden="true" />
@@ -366,49 +388,66 @@ Shared via AeroShield — GenAI Urban Air Defense Copilot`;
                 <button
                   type="button"
                   onClick={() => setShowPlanModal(false)}
-                  className="text-slate-400 hover:text-white"
-                  aria-label="Close Action Plan Modal"
+                  aria-label="Close modal"
+                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
                 >
-                  <X className="h-5 w-5" aria-hidden="true" />
+                  <X className="h-5 w-5" />
                 </button>
               </div>
 
-              <textarea
-                readOnly
-                aria-label="Family Smog Defense Action Plan text"
-                value={exportablePlanText}
-                className="w-full h-64 bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-200 font-mono leading-relaxed resize-none focus:outline-none focus:ring-2 focus:ring-emerald-400"
-              />
+              <p className="text-xs text-slate-300">
+                Export and share this tailored action plan with family, school chat groups, or neighbors via WhatsApp or email:
+              </p>
 
-              <div className="flex items-center justify-between gap-3 pt-2">
-                <span className="text-[11px] text-slate-400">Share with family, school transit pools, or neighbors</span>
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 max-h-64 overflow-y-auto">
+                <pre className="text-xs font-mono text-emerald-200 whitespace-pre-wrap">
+                  {exportablePlanText}
+                </pre>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPlanModal(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-300 hover:bg-slate-800"
+                >
+                  Done
+                </button>
                 <button
                   type="button"
                   onClick={handleCopyPlan}
-                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-all shadow-md focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 transition-all"
                 >
-                  {copiedPlan ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
-                  {copiedPlan ? 'Copied to Clipboard!' : 'Copy Action Plan'}
+                  {copiedPlan ? (
+                    <>
+                      <Check className="h-4 w-4" />
+                      <span>Copied to Clipboard!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4" />
+                      <span>Copy Full Action Plan</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Accessible Footer */}
-        <footer role="contentinfo" className="border-t border-slate-800 bg-slate-900/60 py-5 mt-8">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-300 gap-3">
-            <div>
-              <strong className="text-white font-semibold">AeroShield</strong> — GenAI Urban Air Defense Copilot for PromptWars: Virtual Challenge (Challenge 6)
-            </div>
-            <div className="flex items-center gap-4 text-xs text-slate-400">
-              <span>Peer-Reviewed Standards: EPA • WHO • UC Davis Air Quality Research • ASHRAE 241</span>
-            </div>
+        {/* Footer */}
+        <footer role="contentinfo" className="border-t border-slate-800 bg-slate-900/40 py-6 mt-12 text-center text-xs text-slate-400">
+          <div className="max-w-7xl mx-auto px-4 space-y-2">
+            <p className="text-slate-300">
+              AeroShield Copilot • Multi-Agent Atmospheric Modeling for Extreme Winter Smog
+            </p>
+            <p className="text-[11px] text-slate-400">
+              Validated using US EPA Exposure Factors Handbook, Berkeley Earth Particulate Equivalence, and UC Davis Indoor Aerosol Engineering.
+            </p>
           </div>
         </footer>
       </div>
     </ErrorBoundary>
   );
 }
-
 export default App;

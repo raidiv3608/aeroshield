@@ -8,7 +8,7 @@ interface RoutinePlannerCardProps {
   onApplySchedule: () => void;
 }
 
-export const RoutinePlannerCard: React.FC<RoutinePlannerCardProps> = ({ tasks, onApplySchedule }) => {
+export const RoutinePlannerCard: React.FC<RoutinePlannerCardProps> = React.memo(({ tasks, onApplySchedule }) => {
   const [applied, setApplied] = useState(false);
 
   const handleApply = () => {
@@ -147,4 +147,6 @@ export const RoutinePlannerCard: React.FC<RoutinePlannerCardProps> = ({ tasks, o
       </div>
     </section>
   );
-};
+});
+
+RoutinePlannerCard.displayName = 'RoutinePlannerCard';

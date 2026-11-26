@@ -7,7 +7,7 @@ interface CommunityShieldCardProps {
   pledges: CommunityPledge[];
 }
 
-export const CommunityShieldCard: React.FC<CommunityShieldCardProps> = ({ pledges: initialPledges }) => {
+export const CommunityShieldCard: React.FC<CommunityShieldCardProps> = React.memo(({ pledges: initialPledges }) => {
   const [pledges, setPledges] = useState<CommunityPledge[]>(initialPledges);
   const [pledgedToday, setPledgedToday] = useState(false);
 
@@ -120,4 +120,6 @@ export const CommunityShieldCard: React.FC<CommunityShieldCardProps> = ({ pledge
       </div>
     </section>
   );
-};
+});
+
+CommunityShieldCard.displayName = 'CommunityShieldCard';

@@ -7,7 +7,7 @@ interface IndoorHacksCardProps {
   cookingAndHeatingHacks: string[];
 }
 
-export const IndoorHacksCard: React.FC<IndoorHacksCardProps> = ({
+export const IndoorHacksCard: React.FC<IndoorHacksCardProps> = React.memo(({
   windowVentilationSlot,
   ventilationRationale,
   cookingAndHeatingHacks,
@@ -64,4 +64,6 @@ export const IndoorHacksCard: React.FC<IndoorHacksCardProps> = ({
       </div>
     </section>
   );
-};
+});
+
+IndoorHacksCard.displayName = 'IndoorHacksCard';

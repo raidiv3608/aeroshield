@@ -8,7 +8,7 @@ interface SmogRadarCardProps {
   snapshot: AirQualitySnapshot;
 }
 
-export const SmogRadarCard: React.FC<SmogRadarCardProps> = ({ snapshot }) => {
+export const SmogRadarCard: React.FC<SmogRadarCardProps> = React.memo(({ snapshot }) => {
   const { label, color, description } = getAqiCategory(snapshot.currentPm25);
 
   const chartData = snapshot.hourly.map(h => ({
@@ -186,4 +186,6 @@ export const SmogRadarCard: React.FC<SmogRadarCardProps> = ({ snapshot }) => {
       </div>
     </section>
   );
-};
+});
+
+SmogRadarCard.displayName = 'SmogRadarCard';
