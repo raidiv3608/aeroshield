@@ -2,8 +2,8 @@
 > **PromptWars: Virtual Challenge — Challenge 6: Urban Air Quality Assistant**
 > *Helping families and communities navigate severe winter smog through low-emission routines, DIY indoor air hacks, and quantified personal & collective defense.*
 
-[![AeroShield CI](https://github.com/your-username/aeroshield/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/aeroshield/actions)
-[![Tests: 59 Passed](https://img.shields.io/badge/Tests-59%20Passed-emerald.svg?logo=vitest)](https://vitest.dev)
+[![AeroShield CI](https://github.com/raidiv3608/aeroshield/actions/workflows/ci.yml/badge.svg)](https://github.com/raidiv3608/aeroshield/actions)
+[![Tests: 74 Passed](https://img.shields.io/badge/Tests-74%20Passed-emerald.svg?logo=vitest)](https://vitest.dev)
 [![Accessibility: WCAG 2.1 AA](https://img.shields.io/badge/A11y-WCAG%202.1%20AA%20Compliant-38bdf8.svg)](https://www.w3.org/WAI/standards-guidelines/wcag/)
 [![Bundle: Code-Split](https://img.shields.io/badge/Performance-Code--Split%20%26%20Cached-6366f1.svg)](https://vitejs.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
@@ -116,7 +116,7 @@ flowchart TD
 
 ### 1. Clone & Install
 ```bash
-git clone https://github.com/your-username/aeroshield.git
+git clone https://github.com/raidiv3608/aeroshield.git
 cd aeroshield
 npm install
 ```
