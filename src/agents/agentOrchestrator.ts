@@ -152,7 +152,8 @@ export function runMultiAgentUrbanDefense(
   ];
 
   // Primary representative member for exposure tracking (e.g. child or vulnerable adult)
-  const trackedMember = family[0] || DEFAULT_FAMILY_MEMBERS[0];
+  const effectiveFamily = family && family.length > 0 ? family : DEFAULT_FAMILY_MEMBERS;
+  const trackedMember = effectiveFamily[0];
 
   const optimizedRoutineTasks: RoutineTask[] = initialTasks.map(task => {
     const origPm = snapshot.hourly.find(h => h.hour === task.originalHour)?.pm25 || snapshot.currentPm25;
@@ -190,7 +191,7 @@ export function runMultiAgentUrbanDefense(
   let baselineTotalUrg = 0;
   let optimizedTotalUrg = 0;
 
-  family.forEach(member => {
+  effectiveFamily.forEach(member => {
     optimizedRoutineTasks.forEach(t => {
       const origPm = snapshot.hourly.find(h => h.hour === t.originalHour)?.pm25 || snapshot.currentPm25;
       const optPm = snapshot.hourly.find(h => h.hour === t.optimizedHour)?.pm25 || (snapshot.currentPm25 * 0.6);
